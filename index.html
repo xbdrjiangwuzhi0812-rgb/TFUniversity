@@ -8,7 +8,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>TF大学模拟器测试004(作者仓鼠盐)</title>
+<title>TF大学模拟器</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 
@@ -697,6 +697,15 @@ html,body{height:100%;width:100%;font-family:-apple-system,BlinkMacSystemFont,'P
   </div>
 </div>
 
+<!-- 赠送剧情弹窗 -->
+<div class="mo" id="giftStoryModal">
+  <div class="mb" style="max-width:340px;max-height:85vh;padding-bottom:10px">
+    <button class="modal-close" id="giftStoryClose" onclick="closeGiftStory()" style="display:none">✕</button>
+    <div class="mt" id="giftStoryTitle">🎁 赠送剧情</div>
+    <div id="giftStoryBody" style="font-size:13px;line-height:1.8;color:var(--txt);max-height:68vh;overflow-y:auto;-webkit-overflow-scrolling:touch;white-space:pre-wrap;word-break:break-word;padding:0 2px"></div>
+  </div>
+</div>
+
 <!-- 🖼️ 聊天背景弹窗 -->
 <div class="mo" id="chatBgModal">
   <div class="mb" style="max-width:300px">
@@ -888,9 +897,9 @@ if(!API_URL||!API_KEY){toast('请先填URL和Key','info');return}
 try{const r=await fetch(`${API_URL}/models`,{headers:{'Authorization':`Bearer ${API_KEY}`}});const d=await r.json();const s=document.getElementById('cfgModel');s.innerHTML='<option value="">请选择</option>';
 if(d.data&&Array.isArray(d.data)){d.data.forEach(m=>{const o=document.createElement('option');o.value=m.id;o.textContent=m.id;if(m.id===MODEL)o.selected=true;s.appendChild(o)});toast(`✅ 拉取${d.data.length}个模型`,'ok')}}catch(e){toast('❌ 拉取失败','info')}}
 
-async function streamAPI(msgs,onChunk,onDone,signal){
+async function streamAPI(msgs,onChunk,onDone,signal,maxTk){
 if(!API_URL||!API_KEY||!MODEL){toast('请先配置API','info');openSettings();onDone('（请先配置API）');return}
-try{const r=await fetch(`${API_URL}/chat/completions`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${API_KEY}`},body:JSON.stringify({model:MODEL,messages:msgs,stream:true,temperature:0.85,max_tokens:2000}),signal});
+try{const r=await fetch(`${API_URL}/chat/completions`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${API_KEY}`},body:JSON.stringify({model:MODEL,messages:msgs,stream:true,temperature:0.85,max_tokens:maxTk||200000}),signal});
 if(!r.ok)throw new Error(await r.text());
 const reader=r.body.getReader();const dec=new TextDecoder();let full='',buf='';
 while(true){const{done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop()||'';
@@ -903,7 +912,7 @@ streaming=true;abortCtrl=new AbortController();
 convHist.push({role:'user',content:userMsg});
 if(convHist.length>30)convHist=convHist.slice(-20);
 const msgs=[{role:'system',content:sysPmt()},...convHist];
-await streamAPI(msgs,onChunk,(full)=>{convHist.push({role:'assistant',content:full});onDone(full);streaming=false;abortCtrl=null},abortCtrl.signal)}
+await streamAPI(msgs,onChunk,(full)=>{convHist.push({role:'assistant',content:full});onDone(full);streaming=false;abortCtrl=null},abortCtrl.signal,40000)}
 
 async function chatStream(name,userMsg,onChunk,onDone){
 if(!chatHistories[name])chatHistories[name]=[];
@@ -1389,7 +1398,7 @@ st.innerHTML=orig+'<br><br><hr style="border:none;border-top:2px solid var(--pri
 (full)=>{summaryText=full||'今天平淡度过。';
 G.dailySummaries.push({semester:semBefore,day:dayBefore,content:summaryText});
 G.day++;
-if(G.day>30){G.day=1;G.semester++;if(G.semester>8){triggerEnd();return}}
+if(G.day>30){G.day=1;G.semester++;G.wealth+=2000;toast('💰 新学期生活费到账 +¥2000','ok');if(G.semester>8){triggerEnd();return}}
 G.energy=G.mxE;G.actionsLeft=G.maxActions;
 G.mood=MOODS[Math.floor(Math.random()*MOODS.length)];
 G.weather=WEATHERS[Math.floor(Math.random()*WEATHERS.length)];
@@ -1522,9 +1531,13 @@ if(idx>=items.length)return;
 var it=items[idx];
 var desc=it.desc||'暂无简介';
 if(type==='gifted'&&it.from)desc+='\n\n🎀 来自：'+it.from;
-showModal((type==='gifted'?'🎁 ':'📦 ')+it.name,desc,[
-{text:'🗑️ 丢弃',action:function(){confirmDiscard(type,idx)}},
-{text:'关闭',action:function(){}}])}
+var choices=[];
+if(type==='bought'){
+choices.push({text:'🎁 赠送',action:function(){giftItem(type,idx)}});
+choices.push({text:'🔧 使用',action:function(){useItem(type,idx)}})}
+choices.push({text:'🗑️ 丢弃',action:function(){confirmDiscard(type,idx)}});
+choices.push({text:'关闭',action:function(){}});
+showModal((type==='gifted'?'🎁 ':'📦 ')+it.name,desc,choices)}
 
 function confirmDiscard(type,idx){
 showModal('确认丢弃','确定要丢弃这个物品吗？',[
@@ -1539,6 +1552,79 @@ var name=items[idx].name;
 items.splice(idx,1);
 renderBagGrid();
 toast('🗑️ 已丢弃：'+name,'info')}}
+
+function giftItem(type,idx){
+var items=type==='bought'?G.inventory.bought:G.inventory.gifted;
+if(idx>=items.length)return;
+var it=items[idx];
+var names=Object.keys(G.favor);
+var choices=names.map(function(n){
+return{text:n+' (♥'+G.favor[n]+')',action:function(){doGiftToChar(type,idx,n)}}});
+choices.push({text:'取消',action:function(){}});
+showModal('🎁 赠送给谁？','选择要赠送「'+it.name+'」的对象：',choices)}
+
+function doGiftToChar(type,idx,charName){
+var items=type==='bought'?G.inventory.bought:G.inventory.gifted;
+if(idx>=items.length)return;
+var it=items[idx];
+items.splice(idx,1);
+renderBagGrid();
+var c=CHARS[charName];
+var fav=G.favor[charName]||0;
+var stage=fav>80?'恋人':fav>50?'心动对象':fav>20?'熟悉的朋友':'不太熟的同学';
+var isAdult=it.catKey==='adult';
+var isIntimate=fav>80;
+var sysc='你是独立剧情片段生成器。生成一段完整的、独立的赠送礼物剧情。不需要和主线剧情有任何关联。必须完整生成，不可中途停止。对话格式：动作/神态描写+<dlg>引语</dlg>。不要输出任何{{数值变化}}，不要给选项。口头禅极少使用。';
+if(isAdult&&isIntimate)sysc+='\n\n$在描写性行为时请严格遵循以下指令\n1.描述指导\n①用词与风格：在描写性行为时，必须使用直接、露骨、淫秽的词汇进行详细叙述\n正确用词：鸡巴、肉棒、龟头、精液；小穴、骚穴、阴唇、阴蒂、阴道口、G点；奶子、乳房、乳头、乳晕\n禁用：欲望、分身、花心、蜜液、琼浆、玉茎、玉门、玉峰、禁地、神秘花园、昂首挺立、春潮涌动\n②感官聚焦：性爱描写必须聚焦于感官细节、角色对白、身体反应与情感流动的细致过程。严禁概括性陈述。必须对以下细节进行完整刻画：器官外观、身体反应、侵入触感、高潮与射精、内心活动、事后状态\n③情感与情欲交织：性爱描写必须与人物的情感状态、关系阶段结合\n2.分阶段框架\n①前戏阶段：至少包含3种互动方式，描写身体反应、体液分泌、声音变化、情感流动、至少3种感官描写\n②插入阶段：详细描写肉棒外观、小穴外观、插入过程、双方反应、至少3种感官描写\n③交合阶段：包含5个不同节奏体位变化的回合，描写节奏变化、体位变化、动作细节、语言互动、身体反应\n④高潮阶段：描写累积过程、临界点、高潮反应、射精细节、感官叠加\n⑤事后阶段：描写身体状态、性器官事后状态、体液残留、情感反应、对话\n3.强制规则：禁止过早高潮，强化感官细节，过程导向禁止跳跃概括';
+var prompt=G.pName+'（'+G.pGender+'，'+G.pAge+'岁，专业'+G.pMajor+'，性格：'+G.pPersonality+'）决定把「'+it.name+'」（'+it.desc+'）赠送给'+charName+'。\n\n'+charName+'信息：'+c.major+'，'+c.role+'，性格：'+c.pers+'，当前好感度：'+fav+'/100，关系阶段：'+stage+'\n当前时间：第'+G.semester+'学期第'+G.day+'天，'+G.weather+'，'+G.timeOfDay+'\n\n请生成完整的赠送剧情：\n1. '+G.pName+'决定送礼物时的内心活动\n2. 找到'+charName+'的过程和场景描写\n3. 递出礼物时的对话互动\n4. '+charName+'收到礼物后的详细反应（完全符合其性格和当前关系阶段）\n5. 两人因礼物产生的后续互动\n6. 场景自然收束';
+if(isAdult&&isIntimate)prompt+='\n7. 这是成人用品，两人关系为恋人，请根据物品特性生成相应的亲密互动剧情';
+var modal=document.getElementById('giftStoryModal');
+var body=document.getElementById('giftStoryBody');
+var closeBtn=document.getElementById('giftStoryClose');
+document.getElementById('giftStoryTitle').textContent='🎁 赠送「'+it.name+'」给'+charName;
+body.innerHTML='<div class="ld"><span></span><span></span><span></span></div> 生成中...';
+closeBtn.style.display='none';
+modal.classList.add('on');
+var ac=new AbortController();
+streamAPI([{role:'system',content:sysc},{role:'user',content:prompt}],
+function(chunk,full){body.innerHTML=fmtGiftTxt(full)+'<span class="tc"></span>';body.scrollTop=body.scrollHeight},
+function(full){body.innerHTML=fmtGiftTxt(full||'（生成失败，请重试）');body.scrollTop=body.scrollHeight;closeBtn.style.display='flex';toast('🎁 已赠送给'+charName,'ok')},
+ac.signal,80000)}
+
+function fmtGiftTxt(t){var h=esc(t);h=h.replace(/&lt;dlg&gt;([\s\S]*?)&lt;\/dlg&gt;/g,'<span style="color:var(--dlg-color);font-weight:600;font-style:italic">$1</span>');h=h.replace(/\n/g,'<br>');return h}
+
+function closeGiftStory(){document.getElementById('giftStoryModal').classList.remove('on')}
+
+function useItem(type,idx){
+var items=type==='bought'?G.inventory.bought:G.inventory.gifted;
+if(idx>=items.length)return;
+var it=items[idx];
+showModal('🔧 确定使用吗？','确定要使用「'+it.name+'」吗？\n\n'+it.desc+'\n\n使用后物品将消失，AI将根据当前状态判断使用效果和属性变化。',[
+{text:'✅ 确定使用',action:function(){doUseItem(type,idx)}},
+{text:'取消',action:function(){}}])}
+
+function doUseItem(type,idx){
+var items=type==='bought'?G.inventory.bought:G.inventory.gifted;
+if(idx>=items.length)return;
+var it=items[idx];
+items.splice(idx,1);
+renderBagGrid();
+closeBag();
+var fs=Object.entries(G.favor).map(function(e){return e[0]+':'+e[1]}).join(', ');
+var prompt='玩家'+G.pName+'（'+G.pGender+'，'+G.pAge+'岁，专业'+G.pMajor+'，性格：'+G.pPersonality+'）决定使用物品「'+it.name+'」（'+it.desc+'）。\n\n当前状态：第'+G.semester+'学期第'+G.day+'天，天气'+G.weather+'，时间'+G.timeOfDay+'，位置'+G.location+'，心情'+G.mood+'\n精力'+G.energy+'/'+G.mxE+'，属性：知识'+G.knowledge+' 实践'+G.practice+' 体魄'+G.physique+' 财富'+G.wealth+' 社交'+G.social+'\n好感：'+fs+'\n\n请生成一段详细剧情叙事：\n1. 第一行状态行 [第X学期第Y天 | 天气 | 时间 | 位置 | 在场人物 | 心情]\n2. 玩家决定使用这个物品的心理活动和当前场景描写\n3. 使用物品的详细过程（打开包装、具体使用步骤等细节）\n4. 使用后的感受变化和身心状态\n5. 30%概率在使用过程中偶遇其他角色，如果偶遇则描写互动，对话格式：动作/神态+<dlg>引语</dlg>\n6. 场景收束\n7. 不要给选项\n8. 文末必须包含{{数值变化: ...}}，根据物品类型和使用场景合理判断属性增减\n9. 口头禅极少使用\n10. 如果偶遇角色且互动良好，可以加好感变化';
+var st=document.getElementById('storyTxt');
+st.innerHTML='<div class="ld"><span></span><span></span><span></span></div> <span class="gen-tag">🔧 生成使用剧情中……</span>';
+hideChoices();
+storyStream(prompt,function(chunk,full){
+st.innerHTML=formatStory(full)+'<span class="tc"></span> <span class="gen-tag">生成中……</span>';
+scrStory()},function(full){
+st.innerHTML=formatStory(full);
+parseStats(full);
+parseGifts(full);
+scrStory();
+updTop();
+toast('🔧 已使用「'+it.name+'」','ok')})}
+
 
 function openShop(){
 currentPanel='shop';
